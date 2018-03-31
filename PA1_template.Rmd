@@ -1,25 +1,201 @@
 ---
 title: "Reproducible Research: Peer Assessment 1"
+author: "Edgar Sánchez M."
+date: "March 30, 2018"
 output: 
   html_document:
     keep_md: true
 ---
 
+## Prepare environment
+```{r}
+setwd("~/R/RepData_PeerAssessment1")
+rm(list = ls())
+
+unzip("activity.zip", overwrite = T)
+```
+```{r ldLibs, echo=FALSE}
+library(ggplot2)
+library(dplyr)
+library(xtable)
+```
 
 ## Loading and preprocessing the data
 
+If the data.frame already exists then don't load it again
+```{r}
+if ( !(exists("activity"))) {
+  activity0 <- read.csv("activity.csv")
+}
+activity0$date <- as.Date(activity0$date, "%Y-%m-%d")
+```
+
+Setting all the NA's to zero
+```{r}
+activity <- activity0
+activity[is.na(activity$steps),]$steps <- 0
+```
 
 
 ## What is mean total number of steps taken per day?
 
+Calculate summary data.frame "**summary_sum**" by date
+```{r}
+activity_sum <- group_by(activity, date)  %>% 
+  summarise(totalSteps=sum(steps), meanSteps=mean(steps), medianSteps=median(steps)) %>% 
+  arrange(date)
+activity_sum <- as.data.frame(activity_sum)
+```
 
+Create the histogram showing average steps taken by day
+```{r avgPlot1, fig.width=10}
+barplot(
+  activity_sum$meanSteps, 
+  names.arg = activity_sum$date, 
+  las = 2, 
+  cex.names=0.6, 
+  xlab = "Day", 
+  ylab = "Average Steps",
+  main = "Average Steps by Day",
+  col = "lightblue"
+)
+```
+
+The mean and median steps per day is shown in the following table:
+
+```{r tableMeans1, results="asis", echo=FALSE}
+toShow <- select( activity_sum, date, meanSteps, medianSteps)
+toShow$date <- as.character(toShow$date, "%Y-%m-%d")
+colnames( toShow ) <- c( "Date", "Mean Steps", "Median Steps" )
+
+print( 
+      xtable(toShow), 
+      type="html",
+      include.rownames=FALSE,
+      html.table.attributes='border="1" style="width: 60%; border: 3px solid black; border-collapse: collapse"'
+    )
+```
 
 ## What is the average daily activity pattern?
 
+Summarize info by Interval, generate data.frame "**activity_sum1**"
+```{r}
+activity_sum1 <- group_by(activity, interval) %>% 
+    summarise(totalSteps = sum(steps), avgSteps = mean(steps))
+```
 
+Determine which interval has the maximum values
+```{r}
+maxInterval <- as.numeric( activity_sum1[activity_sum1$totalSteps == max(activity_sum1$totalSteps), 1] )
+```
+
+Which 5-minute interval, on average across all the days in the dataset,
+contains the maximum number of steps? 
+
+Answer:  Interval **#`r maxInterval`**
+
+### Generate the time series plot
+```{r timeSeries, fig.width=10}
+plot( 
+  activity_sum1$interval, 
+  activity_sum1$avgSteps, 
+  type = "l",
+  xlab = "Interval",
+  ylab = "Average steps",
+  main = "Average steps by interval"
+)
+abline( v = maxInterval, col = "red")
+text( maxInterval, 0 , paste("Max interval = ", maxInterval) , pos=4)
+```
 
 ## Imputing missing values
 
+Obtain a vector with NA's from the original data set:
+```{r}
+activityNAS <- activity0[ is.na( activity0$steps ), ] 
+numOfNas <- nrow( activityNAS )
+```
 
+The number of NA's present in the original data set is: **`r numOfNas`**
+
+We're gonna use the **average number of steps per interval** to assign it to the NA values. For this we use data.frame "*activity_sum1*" created before.
+```{r}
+activityNAS <- merge( activityNAS, activity_sum1, all = T ) %>% select( steps=avgSteps, date, interval )
+activity1 <- rbind( activity0[ !is.na( activity0$steps ), ] , activityNAS )
+```
+
+Summarize the modified data.frame, the result is stored in data.frame "**activity_sum2**"
+```{r}
+activity_sum2 <- group_by(activity1, date)  %>% 
+  summarise(totalSteps=sum(steps), meanSteps=mean(steps), medianSteps=median(steps), countSteps=n()) %>% 
+  arrange(date)
+activity_sum2 <- as.data.frame(activity_sum2)
+```
+
+Generate the new plot with the NA values replaced
+```{r barPlot2, fig.width=10}
+barplot(
+  activity_sum2$meanSteps, 
+  names.arg = activity_sum2$date, 
+  las = 2, 
+  cex.names=0.6, 
+  xlab = "Day", 
+  ylab = "Average Steps",
+  main = "Average Steps by Day (with NAS)",
+  col = "lightgreen"
+)
+```
+The mean and median steps per day is shown in the following table:
+
+```{r tableMeans2, results="asis", echo=FALSE}
+toShow <- select( activity_sum2, date, meanSteps, medianSteps)
+toShow$date <- as.character(toShow$date, "%Y-%m-%d")
+colnames( toShow ) <- c( "Date", "Mean Steps", "Median Steps" )
+
+print( 
+      xtable(toShow), 
+      type="html",
+      include.rownames=FALSE,
+      html.table.attributes='border="1" style="width: 60%; border: 3px solid black; border-collapse: collapse"'
+    )
+```
 
 ## Are there differences in activity patterns between weekdays and weekends?
+
+In order to determine the label for Weekdays and Weekends, the following function is defined:
+```{r}
+isWeekend <- function( x ){
+  if( as.POSIXlt(x)$wday %in% c(0,6)){
+    "Weekend"
+  } else {
+    "Weekday"
+  }
+}
+```
+If posix weekday number is 0 (Sunday) or 6 (Saturday), then the label is "Weekend" else it's "Weekday"
+
+Use the function to generate column labeling what type of day it is
+```{r}
+weekDayVect <- sapply( activity1$date, isWeekend )
+activity1 <- cbind( activity1, dayType = weekDayVect)
+```
+
+Summarize the information by DayType and Interval
+```{r}
+plot_data <- aggregate(steps~ dayType + interval, data=activity1 , mean )
+```
+
+Generate plot, there is more step activity during the first intervals of Weekdays:
+```{r plotWeekends, fig.width=10, fig.height=8}
+daysType <- qplot( 
+              interval, 
+              steps, 
+              data=plot_data, 
+              facets=dayType~. , 
+              geom = "line",
+              xlab = "Interval",
+              ylab = "Number of Steps"
+            )
+print(daysType)
+```
+
